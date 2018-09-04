@@ -173,11 +173,15 @@ Game::Game() {
 			}
 			return f->second;
 		};
-		tile_mesh = lookup("Tile");
-		cursor_mesh = lookup("Cursor");
-		doll_mesh = lookup("Doll");
-		egg_mesh = lookup("Egg");
-		cube_mesh = lookup("Cube");
+
+		floor_mesh = lookup("Floor");
+		plus_mesh = lookup("+");
+		L_mesh = lookup("L");
+		I_mesh = lookup("I");
+		i_mesh = lookup("i");
+		T_mesh = lookup("T");
+		player_mesh = lookup("Player");
+		goal_mesh = lookup("Goal");
 	}
 
 	{ //create vertex array object to hold the map from the mesh vertex buffer to shader program attributes:
@@ -201,17 +205,12 @@ Game::Game() {
 	GL_ERRORS();
 
 	//----------------
-	//set up game board with meshes and rolls:
-	board_meshes.reserve(board_size.x * board_size.y);
-	board_rotations.reserve(board_size.x * board_size.y);
-	std::mt19937 mt(0xbead1234);
 
-	std::vector< Mesh const * > meshes{ &doll_mesh, &egg_mesh, &cube_mesh };
+	// by default, slight shear left
+	shear = glm::angleAxis(0.3f, glm::vec3(-0.25f, 0.25f, 0.0f));
+	board_rotation = glm::normalize(shear * glm::quat(0.0f, 0.0f, 1.0f, 0.0f));
 
-	for (uint32_t i = 0; i < board_size.x * board_size.y; ++i) {
-		board_meshes.emplace_back(meshes[mt()%meshes.size()]);
-		board_rotations.emplace_back(glm::quat());
-	}
+	generate_board();
 }
 
 Game::~Game() {
@@ -227,81 +226,231 @@ Game::~Game() {
 	GL_ERRORS();
 }
 
+void Game::set_mesh(glm::vec2 pos, int connected_dirs_bitvec) {
+	bool up = get_dir_bitvec(connected_dirs_bitvec, Game::UP);
+	bool left = get_dir_bitvec(connected_dirs_bitvec, Game::LEFT);
+	bool down = get_dir_bitvec(connected_dirs_bitvec, Game::DOWN);
+	bool right = get_dir_bitvec(connected_dirs_bitvec, Game::RIGHT);
+
+	// update connectivity
+	tile_connections[pos.y*board_size.x+pos.x] = connected_dirs_bitvec;
+
+	// update meshes
+	if (up && down && !left && !right) { // I
+		path_meshes[pos.y*board_size.x+pos.x] = &I_mesh;
+	}
+	else if (!up && !down && left && right) { // I
+		path_meshes[pos.y*board_size.x+pos.x] = &I_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(0.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (((int)up + (int)left + (int)down + (int)right) == 1) { // i
+		path_meshes[pos.y*board_size.x+pos.x] = &i_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		int rot = (int)down * (int)Game::UP + (int)left * (int)Game::LEFT + (int)up * (int)Game::DOWN + (int)right * Game::RIGHT;
+		r = glm::normalize(r * glm::angleAxis(rot*0.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (!up && down && left && right) { // T
+		path_meshes[pos.y*board_size.x+pos.x] = &T_mesh;
+	}
+	else if (up && down && left && !right) { // T rotated 90
+		path_meshes[pos.y*board_size.x+pos.x] = &T_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(0.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (up && !down && left && right) { // T rotated 180
+		path_meshes[pos.y*board_size.x+pos.x] = &T_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (up && down && !left && right) { // T rotated 270
+		path_meshes[pos.y*board_size.x+pos.x] = &T_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(1.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (!up && down && !left && right) { // r
+		path_meshes[pos.y*board_size.x+pos.x] = &L_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(1.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (!up && down && left && !right) { // r rotated 90
+		path_meshes[pos.y*board_size.x+pos.x] = &L_mesh;
+	}
+	else if (up && !down && left && !right) { // r rotated 180
+		path_meshes[pos.y*board_size.x+pos.x] = &L_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(0.5f*glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else if (up && !down && !left && right) { // r rotated 270
+		path_meshes[pos.y*board_size.x+pos.x] = &L_mesh;
+		glm::quat &r = tile_rotations[pos.y*board_size.x+pos.x];
+		r = glm::normalize(r * glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)));
+	}
+	else { // +
+		path_meshes[pos.y*board_size.x+pos.x] = &plus_mesh;
+	}
+}
+
+bool Game::valid_pos(glm::vec2 pos) {
+	return (0 <= pos.x && pos.x < board_size.x) && (0 <= pos.y && pos.y < board_size.y);
+}
+
+bool Game::equal_pos(glm::vec2 first, glm::vec2 second) {
+	return (int)first.x == (int)second.x && (int)first.y == (int)second.y;
+}
+
+void Game::set_dir_bitvec(int &dir_bitvec, DIR dir) {
+	dir_bitvec |= (1 << dir);
+}
+bool Game::get_dir_bitvec(int dir_bitvec, DIR dir) {
+	return dir_bitvec & (1 << dir);
+}
+
+bool Game::generate_board_helper(glm::vec2 pos, glm::vec2 from_dir, std::unordered_set<int> &visited) {
+	// mark as visited
+	visited.insert(pos.y*board_size.x+pos.x);
+
+	// std::cout << "visiting " << pos.x << " " << pos.y << ", size: " << visited.size() << std::endl;
+
+	// keep track of whether dfs completed or not
+	bool done = false;
+
+	// keep track of which directions are connected
+	int connected_dirs_bitvec = 0;
+
+	// the moment we visit the last cell, set the cell as goal, and backtrack to
+	// the starting cell. every cell traversed during this final "backtrack" will
+	// be included in the resulting path.
+	if (visited.size() >= (board_size.x * board_size.y)) {
+		goal = pos;
+		done = true;
+	}
+
+	// generate permuted list of directions
+	std::vector<DIR> shuffled_dirs = {UP,LEFT,DOWN,RIGHT};
+	std::random_shuffle(shuffled_dirs.begin(), shuffled_dirs.end());
+
+	for (auto it = shuffled_dirs.begin(); it != shuffled_dirs.end(); it++) {
+		glm::vec2 dir = direction_vecs[*it];
+		bool through = false;
+
+		// std::cout << dir.x << "," << dir.y << " " << from_dir.x << "," << from_dir.y << std::endl;
+
+		if (equal_pos(dir, -from_dir)) {
+			through = true;
+		} else {
+			glm::vec2 new_pos = pos + dir;
+			if (visited.find(new_pos.y*board_size.x+new_pos.x) == visited.end() && valid_pos(new_pos)) {
+				if (generate_board_helper(new_pos, dir, visited)) {
+					through = true;
+					done = true;
+				}
+			}
+		}
+
+		if (through) {
+			if (dir.y > 0) { set_dir_bitvec(connected_dirs_bitvec, Game::UP); }
+			if (dir.x < 0) { set_dir_bitvec(connected_dirs_bitvec, Game::LEFT); }
+			if (dir.y < 0) { set_dir_bitvec(connected_dirs_bitvec, Game::DOWN); }
+			if (dir.x > 0) { set_dir_bitvec(connected_dirs_bitvec, Game::RIGHT); }
+		}
+	}
+
+	if (done) {
+		// std::cout << pos.x << " " << pos.y << std::endl;
+		set_mesh(pos, connected_dirs_bitvec);
+	}
+	return done;
+}
+
+void Game::clear_board() {
+	path_meshes.clear();
+	tile_rotations.clear();
+	tile_connections.clear();
+
+	// re-reserve to maintain capacity
+	path_meshes.reserve(board_size.x * board_size.y);
+	tile_rotations.reserve(board_size.x * board_size.y);
+	tile_connections.reserve(board_size.x * board_size.y);
+
+	for (uint32_t i = 0; i < board_size.x * board_size.y; ++i) {
+		path_meshes.emplace_back(&floor_mesh);
+		tile_rotations.emplace_back(board_rotation);
+		tile_connections.emplace_back(0);
+	}
+}
+
+void Game::generate_board() {
+	std::mt19937 mt(time(NULL));
+
+	// pick a random position on the bottom or top edge of board
+	float x = mt()%board_size.x;
+	float y = mt()%2 * (board_size.y-1);
+
+	start = glm::vec2(x, y);
+	player = start;
+
+	clear_board();
+
+	// scramble keys
+	std::random_shuffle(shuffled_keys.begin(), shuffled_keys.end());
+
+	std::unordered_set<int> visited;
+	generate_board_helper(player, glm::vec2(0,0), visited);
+}
+
+Game::DIR Game::flip_dir(Game::DIR dir) {
+	return (Game::DIR)((dir + 2) % 4);
+}
+
 bool Game::handle_event(SDL_Event const &evt, glm::uvec2 window_size) {
 	//ignore any keys that are the result of automatic key repeat:
-	if (evt.type == SDL_KEYDOWN && evt.key.repeat) {
+	if ((evt.type == SDL_KEYDOWN && evt.key.repeat) || reset_after_updates > 0) {
 		return false;
-	}
-	//handle tracking the state of WSAD for roll control:
-	if (evt.type == SDL_KEYDOWN || evt.type == SDL_KEYUP) {
-		if (evt.key.keysym.scancode == SDL_SCANCODE_W) {
-			controls.roll_up = (evt.type == SDL_KEYDOWN);
-			return true;
-		} else if (evt.key.keysym.scancode == SDL_SCANCODE_S) {
-			controls.roll_down = (evt.type == SDL_KEYDOWN);
-			return true;
-		} else if (evt.key.keysym.scancode == SDL_SCANCODE_A) {
-			controls.roll_left = (evt.type == SDL_KEYDOWN);
-			return true;
-		} else if (evt.key.keysym.scancode == SDL_SCANCODE_D) {
-			controls.roll_right = (evt.type == SDL_KEYDOWN);
-			return true;
-		}
 	}
 	//move cursor on L/R/U/D press:
 	if (evt.type == SDL_KEYDOWN && evt.key.repeat == 0) {
-		if (evt.key.keysym.scancode == SDL_SCANCODE_LEFT) {
-			if (cursor.x > 0) {
-				cursor.x -= 1;
-			}
-			return true;
-		} else if (evt.key.keysym.scancode == SDL_SCANCODE_RIGHT) {
-			if (cursor.x + 1 < board_size.x) {
-				cursor.x += 1;
-			}
-			return true;
-		} else if (evt.key.keysym.scancode == SDL_SCANCODE_UP) {
-			if (cursor.y + 1 < board_size.y) {
-				cursor.y += 1;
-			}
-			return true;
+		DIR dir = Game::STAY;
+		if (evt.key.keysym.scancode == SDL_SCANCODE_UP) {
+			dir = shuffled_keys[0];
+		} else if (evt.key.keysym.scancode == SDL_SCANCODE_LEFT) {
+			dir = shuffled_keys[1];
 		} else if (evt.key.keysym.scancode == SDL_SCANCODE_DOWN) {
-			if (cursor.y > 0) {
-				cursor.y -= 1;
-			}
-			return true;
+			dir = shuffled_keys[2];
+		} else if (evt.key.keysym.scancode == SDL_SCANCODE_RIGHT) {
+			dir = shuffled_keys[3];
 		}
+
+		if (dir == Game::STAY || !valid_pos(player + direction_vecs[dir])) {
+			return false;
+		}
+
+		if (!get_dir_bitvec(tile_connections[player.y*board_size.x+player.x], dir)) {
+			reset_after_updates = 20;
+			player += (direction_vecs[dir] / 2.0f);
+		} else {
+			player += (direction_vecs[dir]);
+		}
+		return true;
 	}
+
 	return false;
 }
 
 void Game::update(float elapsed) {
-	//if the roll keys are pressed, rotate everything on the same row or column as the cursor:
-	glm::quat dr = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-	float amt = elapsed * 1.0f;
-	if (controls.roll_left) {
-		dr = glm::angleAxis(amt, glm::vec3(0.0f, 1.0f, 0.0f)) * dr;
-	}
-	if (controls.roll_right) {
-		dr = glm::angleAxis(-amt, glm::vec3(0.0f, 1.0f, 0.0f)) * dr;
-	}
-	if (controls.roll_up) {
-		dr = glm::angleAxis(amt, glm::vec3(1.0f, 0.0f, 0.0f)) * dr;
-	}
-	if (controls.roll_down) {
-		dr = glm::angleAxis(-amt, glm::vec3(1.0f, 0.0f, 0.0f)) * dr;
-	}
-	if (dr != glm::quat()) {
-		for (uint32_t x = 0; x < board_size.x; ++x) {
-			glm::quat &r = board_rotations[cursor.y * board_size.x + x];
-			r = glm::normalize(dr * r);
+	if (reset_after_updates > 0) {
+		reset_after_updates--;
+
+		if (reset_after_updates == 0) {
+			// reset player to start
+			player = start;
 		}
-		for (uint32_t y = 0; y < board_size.y; ++y) {
-			if (y != cursor.y) {
-				glm::quat &r = board_rotations[y * board_size.x + cursor.x];
-				r = glm::normalize(dr * r);
-			}
-		}
+	}
+
+	if (player == goal) {
+		score++;
+		// generate new level
+		generate_board();
 	}
 }
 
@@ -360,7 +509,7 @@ void Game::draw(glm::uvec2 drawable_size) {
 
 	for (uint32_t y = 0; y < board_size.y; ++y) {
 		for (uint32_t x = 0; x < board_size.x; ++x) {
-			draw_mesh(tile_mesh,
+			draw_mesh(floor_mesh,
 				glm::mat4(
 					1.0f, 0.0f, 0.0f, 0.0f,
 					0.0f, 1.0f, 0.0f, 0.0f,
@@ -368,26 +517,50 @@ void Game::draw(glm::uvec2 drawable_size) {
 					x+0.5f, y+0.5f,-0.5f, 1.0f
 				)
 			);
-			draw_mesh(*board_meshes[y*board_size.x+x],
-				glm::mat4(
-					1.0f, 0.0f, 0.0f, 0.0f,
-					0.0f, 1.0f, 0.0f, 0.0f,
-					0.0f, 0.0f, 1.0f, 0.0f,
-					x+0.5f, y+0.5f, 0.0f, 1.0f
-				)
-				* glm::mat4_cast(board_rotations[y*board_size.x+x])
-			);
+			if (path_meshes[y*board_size.x+x] != NULL) {
+				draw_mesh(*path_meshes[y*board_size.x+x],
+					glm::mat4(
+						0.5f, 0.0f, 0.0f, 0.0f,
+						0.0f, 0.5f, 0.0f, 0.0f,
+						0.0f, 0.0f, 0.5f, 0.0f,
+						x+0.5f, y+0.5f, 0.0f, 1.0f
+					)
+					* glm::mat4_cast(glm::normalize(tile_rotations[y*board_size.x+x]))
+				);
+			}
 		}
 	}
-	draw_mesh(cursor_mesh,
+	draw_mesh(player_mesh,
 		glm::mat4(
-			1.0f, 0.0f, 0.0f, 0.0f,
-			0.0f, 1.0f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f,
-			cursor.x+0.5f, cursor.y+0.5f, 0.0f, 1.0f
+			0.5f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.5f, 0.0f, 0.0f,
+			0.0f, 0.0f, 0.5f, 0.0f,
+			player.x+0.5f, player.y+0.5f, 0.0f, 1.0f
+		)
+		* glm::mat4_cast(shear)
+	);
+	draw_mesh(goal_mesh,
+		glm::mat4(
+			0.5f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.5f, 0.0f, 0.0f,
+			0.0f, 0.0f, 0.5f, 0.0f,
+			goal.x+0.5f, goal.y+0.5f, 0.0f, 1.0f
 		)
 	);
-
+	// display the score as stars to the side of the board; if score gets too
+	// high start shrinking the stars
+	// 9 is the max number that fits in its default size
+	float size = std::min((9.0f / (float)score), 1.0f) * 0.5f;
+	for (int i = 0; i < score; i++) {
+		draw_mesh(goal_mesh,
+			glm::mat4(
+				size, 0.0f, 0.0f, 0.0f,
+				0.0f, size, 0.0f, 0.0f,
+				0.0f, 0.0f, size, 0.0f,
+				-1.0f, (i+1)*size, 0.0f, 1.0f
+			)
+		);
+	}
 
 	glUseProgram(0);
 

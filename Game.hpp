@@ -7,6 +7,8 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <vector>
+#include <unordered_set>
+#include <random>
 
 // The 'Game' struct holds all of the game-relevant state,
 // and is called by the main loop.
@@ -27,6 +29,18 @@ struct Game {
 
 	//draw is called after update:
 	void draw(glm::uvec2 drawable_size);
+
+	enum DIR { STAY=-1, UP, LEFT, DOWN, RIGHT };
+
+	void set_mesh(glm::vec2 pos, int connected_dirs_bitvec);
+	bool valid_pos(glm::vec2 pos);
+	bool equal_pos(glm::vec2 first, glm::vec2 second);
+	void set_dir_bitvec(int &dir_bitvec, DIR dir);
+	bool get_dir_bitvec(int dir_bitvec, DIR dir);
+	DIR flip_dir(DIR dir);
+	bool generate_board_helper(glm::vec2 pos, glm::vec2 from_dir, std::unordered_set<int> &visited);
+	void generate_board();
+	void clear_board();
 
 	//------- opengl resources -------
 
@@ -58,27 +72,36 @@ struct Game {
 		GLsizei count = 0;
 	};
 
-	Mesh tile_mesh;
-	Mesh cursor_mesh;
-	Mesh doll_mesh;
-	Mesh egg_mesh;
-	Mesh cube_mesh;
+	Mesh floor_mesh;
+	Mesh plus_mesh;
+	Mesh L_mesh;
+	Mesh I_mesh;
+	Mesh i_mesh;
+	Mesh T_mesh;
+	Mesh player_mesh;
+	Mesh goal_mesh;
 
 	GLuint meshes_for_simple_shading_vao = -1U; //vertex array object that describes how to connect the meshes_vbo to the simple_shading_program
 
 	//------- game state -------
 
-	glm::uvec2 board_size = glm::uvec2(5,4);
-	std::vector< Mesh const * > board_meshes;
-	std::vector< glm::quat > board_rotations;
+	glm::uvec2 board_size = glm::uvec2(5,5);
+	glm::quat shear;
+	glm::quat board_rotation;
 
-	glm::uvec2 cursor = glm::vec2(0,0);
+	// up, left, down, right
+	std::vector<glm::vec2> direction_vecs = {glm::vec2(0,1), glm::vec2(-1,0), glm::vec2(0,-1), glm::vec2(1,0)};
 
-	struct {
-		bool roll_left = false;
-		bool roll_right = false;
-		bool roll_up = false;
-		bool roll_down = false;
-	} controls;
+	std::vector< Mesh * > path_meshes;
+	std::vector< glm::quat > tile_rotations;
+	std::vector< int > tile_connections;
+	std::vector< DIR > shuffled_keys = {UP,LEFT,DOWN,RIGHT};
+
+	glm::vec2 start = glm::vec2(0,0);
+	glm::vec2 player = glm::vec2(0,0);
+	glm::vec2 goal = glm::vec2(0,0);
+
+	int reset_after_updates = 0;
+	int score = 0;
 
 };
