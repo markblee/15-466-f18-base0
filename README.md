@@ -1,11 +1,11 @@
 # Game Information
 (Note: fill in this portion with information about your game.)
 
-Title: (TODO: your game's title)
+Title: Drunk sim
 
-Author: (TODO: your name)
+Author: Mark Lee
 
-Design Document: [TODO: name of design document](TODO: link to design document)
+Design Document: [Drunk Simulator](http://graphics.cs.cmu.edu/courses/15-466-f18/game0-designs/marklee/)
 
 Screen Shot:
 
@@ -13,11 +13,11 @@ Screen Shot:
 
 Difficulties Encountered:
 
-TODO: write several sentences about any difficulties you may have encountered in creating the game.
+It took a little tweaking to get the shearing + rotation of the path tiles to get the right visual result, since the order of operations for the transforms matter. There was also not an obvious (elegant) way to go from a connectivity graph to the meshes to be rendered (with the correct rotations) such that the resulting path looks connected, which resulted in a really ugly function `set_mesh` which would most definitely be refactored given more time.
 
 Good Code:
 
-TODO: write a sentence or two about any code you think you did particularly well.
+One relatively interesting thing I realized when thinking about the path generation algorithm was that a path could be generated simply by running a DFS and keeping only the cells that are never "backtracked", from the start up until the point at which all cells are initially visited. This meant path generation was super simple, since as soon as `count(number of visited cells) == total_num_cells`, we flip a `done` flag to true, and every subsequent "backtrack" (i.e. return from nested DFS call) gives us a piece of the path.
 
 # Using This Base Code
 
